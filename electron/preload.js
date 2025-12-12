@@ -15,4 +15,3 @@ contextBridge.exposeInMainWorld('ipc', {
     throw new Error(`Invalid IPC channel: ${channel}`);
   }
 });
-
