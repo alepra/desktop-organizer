@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "vite --config vite.config.mjs --port 53001 --strictPort",
-    "electron": "wait-on http://localhost:53001 && electron .",
-    "start": "concurrently -k \"npm run dev\" \"npm run electron\"",
+    "electron": "wait-on http://localhost:53001 && electron . --no-sandbox",
+    "start": "concurrently \"npm run dev\" \"npm run electron\"",
     "build": "vite build",
     "build-electron": "electron-builder"
   },

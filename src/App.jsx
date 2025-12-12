@@ -1,16 +1,22 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { groupFiles } from "./logic/groupFiles";
 import { getGroupColor } from "./logic/colors";
 import "./FadeItem.css";
-import "./TestAnimation.css";
 
-function FadeItem({ children, delay, group }) {
+function FadeItem({ children, style, group, delay }) {
+  const color = getGroupColor(group);
+
   return (
     <div
       className="fade-item"
       style={{
-        animation: `fadeLift 0.45s ease ${delay}ms`,
-        boxShadow: `0 0 0 4px ${getGroupColor(group)}`
+        ...style,
+        "--halo-color": color,
+        boxShadow: `0 0 0 6px ${color}`,
+        animation: `
+          fadeInSoft 0.5s ease ${delay}ms forwards,
+          pulseHalo 2.4s ease-in-out ${delay + 500}ms infinite
+        `
       }}
     >
       {children}
@@ -18,70 +24,84 @@ function FadeItem({ children, delay, group }) {
   );
 }
 
-function makeKey(group, file, index) {
-  return `${group}__${file.name}__${index}`;
-}
-
 export default function App() {
   const [files, setFiles] = useState([]);
-
-  useEffect(() => {
-    console.log("FILES UPDATED:", files);
-  }, [files]);
+  const [positions, setPositions] = useState({});
+  const [mode, setMode] = useState("idle");
 
   async function scanDesktop() {
-    console.log("SCAN CLICKED");
     const result = await window.electron.invoke("scan-desktop");
-    console.log("SCAN RESULT FILES:", result);
     setFiles(result);
+
+    const scatter = {};
+    result.forEach((f) => {
+      scatter[f.path] = {
+        x: Math.random() * 900,
+        y: Math.random() * 500
+      };
+    });
+
+    setPositions(scatter);
+    setMode("scatter");
+
+    setTimeout(() => setMode("migrate"), 700);
   }
 
   const groups = useMemo(() => groupFiles(files), [files]);
 
-  const [testStyle, setTestStyle] = useState({
-    width: "50px",
-    height: "50px",
-    background: "red",
-    opacity: 0,
-    transition: "opacity 1s ease",
-  });
-
-  useEffect(() => {
-    setTimeout(() => {
-      setTestStyle((prev) => ({
-        ...prev,
-        opacity: 1,
-      }));
-    }, 1000);
-  }, []);
+  const groupCenters = useMemo(() => {
+    const centers = {};
+    Object.keys(groups).forEach((group, i) => {
+      centers[group] = {
+        x: 150 + i * 280,
+        y: 200
+      };
+    });
+    return centers;
+  }, [groups]);
 
   return (
     <div style={{ padding: 20, fontFamily: "sans-serif" }}>
-      <div className="test-box"></div>
       <button onClick={scanDesktop}>Scan Desktop</button>
 
-      <div style={{ marginTop: 20 }}>
-        {files.length === 0
-          ? "No files scanned yet."
-          : Object.entries(groups).map(([group, items], idx) => (
-              <div key={group} style={{ marginBottom: "20px" }}>
-                <div style={{
-                  fontWeight: "bold",
-                  marginBottom: "6px",
-                  fontSize: "16px"
-                }}>
-                  {group.toUpperCase()}
-                </div>
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          height: "650px",
+          marginTop: 20
+        }}
+      >
+        {Object.entries(groups).map(([group, items]) =>
+          items.map((f, idx) => {
+            const base = positions[f.path] || { x: 0, y: 0 };
+            const center = groupCenters[group];
 
-                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                  {items.map((f, itemIndex) => (
-                    <FadeItem key={makeKey(group, f, itemIndex)} delay={itemIndex * 40} group={group}>
-                      {f.name}
-                    </FadeItem>
-                  ))}
-                </div>
-              </div>
-            ))}
+            const col = idx % 3;
+            const row = Math.floor(idx / 3);
+
+            const targetX = center.x + col * 110;
+            const targetY = center.y + row * 70;
+
+            const x = mode === "migrate" ? targetX : base.x;
+            const y = mode === "migrate" ? targetY : base.y;
+
+            return (
+              <FadeItem
+                key={f.path}
+                group={group}
+                delay={idx * 40}
+                style={{
+                  position: "absolute",
+                  transform: `translate(${x}px, ${y}px)`,
+                  transition: "transform 0.9s ease"
+                }}
+              >
+                {f.name}
+              </FadeItem>
+            );
+          })
+        )}
       </div>
     </div>
   );

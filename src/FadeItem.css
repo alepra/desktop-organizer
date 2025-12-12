@@ -1,20 +1,30 @@
 .fade-item {
   opacity: 0;
-  transform: translateY(10px);
-  animation-fill-mode: forwards;
   padding: 8px 12px;
   border-radius: 10px;
   background: white;
-  font-size: 14px;
+  transition: opacity 0.45s ease;
 }
 
-@keyframes fadeLift {
-  0% {
+/* Soft fade-in ONLY — no transform here */
+@keyframes fadeInSoft {
+  from {
     opacity: 0;
-    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Continuous halo pulse */
+@keyframes pulseHalo {
+  0% {
+    box-shadow: 0 0 0 6px var(--halo-color);
+  }
+  50% {
+    box-shadow: 0 0 0 10px var(--halo-color);
   }
   100% {
-    opacity: 1;
-    transform: translateY(0px);
+    box-shadow: 0 0 0 6px var(--halo-color);
   }
 }
