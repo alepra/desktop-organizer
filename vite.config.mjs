@@ -3,8 +3,13 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    exclude: ["electron"]
+  },
   server: {
-    port: 51234,
+    hmr: false,
+    cors: false,
+    port: 53001,
     strictPort: true
   },
   build: {

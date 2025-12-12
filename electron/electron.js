@@ -1,91 +1,39 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-const http = require('http');
-const { registerHandlers } = require('./ipcHandlers');
+const { app, BrowserWindow } = require("electron");
+const path = require("path");
+require(path.join(__dirname, "ipcHandlers"));
 
-let mainWindow;
+console.log("ELECTRON MAIN FILE LOADED");
 
-const devUrl = "http://localhost:51234";
-
-// Wait for Vite server with retries
-async function waitForVite(maxRetries = 20) {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const found = await new Promise((resolve, reject) => {
-        const req = http.get(devUrl, (res) => {
-          // Check if it's actually Vite (should return HTML or have vite headers)
-          if (res.statusCode === 200 || res.statusCode === 304) {
-            resolve(true);
-          } else {
-            reject(new Error(`Server responded with status ${res.statusCode}`));
-          }
-        });
-        req.on('error', () => reject());
-        req.setTimeout(500, () => {
-          req.destroy();
-          reject(new Error('Timeout'));
-        });
-      });
-      if (found) {
-        return devUrl;
-      }
-    } catch (e) {
-      // Continue retrying
-    }
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  throw new Error('Vite server not found after retries');
-}
+let mainWindow = null;
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    resizable: false,
+  console.log("System reduced motion:", require("electron").nativeTheme.shouldUseReducedMotion);
+
+  let win = new BrowserWindow({
+    width: 1280,
+    height: 900,
+    show: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false
+      preload: path.join(__dirname, "preload.js"),
+      enableBlinkFeatures: "CSSAnimations,CSSTransitions",
+      backgroundThrottling: false
     }
   });
 
-  // Load from Vite dev server in development, or from built files in production
-  if (!app.isPackaged) {
-    waitForVite()
-      .then(url => {
-        console.log(`Loading Vite dev server at ${url}`);
-        mainWindow.loadURL(url);
-      })
-      .catch(err => {
-        console.error('Failed to find Vite dev server:', err);
-        console.log(`Trying ${devUrl} directly...`);
-        mainWindow.loadURL(devUrl);
-      });
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
-  }
+  mainWindow = win;
 
-  // Open DevTools in development mode only
-  // if (!app.isPackaged) {
-  //   mainWindow.webContents.openDevTools();
-  // }
+  win.loadURL("http://localhost:53001");
+
+  win.on("closed", () => {
+  });
 }
 
 app.whenReady().then(() => {
-  // Register IPC handlers
-  registerHandlers(ipcMain);
-  
+  require("electron").app.commandLine.appendSwitch("disable-renderer-backgrounding");
+  require("electron").nativeTheme.themeSource = "light";
   createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+app.on("window-all-closed", () => {
+  app.quit();
 });

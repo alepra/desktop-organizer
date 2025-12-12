@@ -1,34 +1,27 @@
-// Placeholder IPC handlers for Electron backend
-// No real filesystem operations yet - will be added in later phases
+const { ipcMain } = require("electron");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 
-function registerHandlers(ipcMain) {
-  // Placeholder: scan desktop directory
-  ipcMain.handle('scan-desktop', async () => {
-    return {
-      success: true,
-      files: [],
-      message: 'Placeholder scan - no files returned yet'
-    };
-  });
+ipcMain.handle("scan-desktop", async () => {
+  const possible = [
+    path.join(os.homedir(), "Desktop"),
+    path.join(os.homedir(), "OneDrive", "Desktop"),
+    "C:\\Users\\alepr\\OneDrive\\Desktop",
+    "C:\\Users\\Public\\Desktop"
+  ];
 
-  // Placeholder: get initial application state
-  ipcMain.handle('get-initial-state', async () => {
-    return {
-      success: true,
-      message: 'IPC connection successful! (Placeholder state)',
-      desktopFiles: [],
-      clusters: []
-    };
-  });
+  for (const p of possible) {
+    try {
+      const entries = fs.readdirSync(p, { withFileTypes: true });
+      return entries
+        .filter(e => e.isFile())
+        .map(e => ({
+          name: e.name,
+          path: path.join(p, e.name)
+        }));
+    } catch (_) {}
+  }
 
-  // Placeholder: perform actions
-  ipcMain.handle('perform-placeholder-action', async (event, action) => {
-    return {
-      success: true,
-      message: `Placeholder action "${action}" received`
-    };
-  });
-}
-
-module.exports = { registerHandlers };
-
+  return [{ name: "Desktop not found", path: "" }];
+});

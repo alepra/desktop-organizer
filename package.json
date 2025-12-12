@@ -4,8 +4,8 @@
   "main": "electron/electron.js",
   "private": true,
   "scripts": {
-    "dev": "vite --config vite.config.mjs --port 51234 --strictPort",
-    "electron": "wait-on http://localhost:51234 && electron .",
+    "dev": "vite --config vite.config.mjs --port 53001 --strictPort",
+    "electron": "wait-on http://localhost:53001 && electron .",
     "start": "concurrently -k \"npm run dev\" \"npm run electron\"",
     "build": "vite build",
     "build-electron": "electron-builder"
