@@ -4,9 +4,10 @@
   "main": "electron/electron.js",
   "private": true,
   "scripts": {
+    "kill-port": "kill-port 53001",
     "dev": "vite --config vite.config.mjs --port 53001 --strictPort",
     "electron": "wait-on http://localhost:53001 && electron . --no-sandbox",
-    "start": "concurrently \"npm run dev\" \"npm run electron\"",
+    "start": "npm run kill-port && concurrently \"npm run dev\" \"npm run electron\"",
     "build": "vite build",
     "build-electron": "electron-builder"
   },
@@ -15,6 +16,7 @@
     "concurrently": "^8.2.2",
     "electron": "^33.0.2",
     "electron-builder": "^24.13.3",
+    "kill-port": "^2.0.1",
     "vite": "^5.4.0",
     "wait-on": "^7.2.0"
   },

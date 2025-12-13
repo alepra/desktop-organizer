@@ -3,7 +3,7 @@
   padding: 8px 12px;
   border-radius: 10px;
   background: white;
-  transition: opacity 0.45s ease;
+  transition: opacity 0.45s ease, box-shadow 0.6s ease;
 }
 
 /* Soft fade-in ONLY — no transform here */
@@ -27,4 +27,11 @@
   100% {
     box-shadow: 0 0 0 6px var(--halo-color);
   }
+}
+
+/* Cluster label hover effect */
+.cluster-label-container:hover .cluster-label {
+  opacity: 1 !important;
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: var(--label-color) !important;
 }

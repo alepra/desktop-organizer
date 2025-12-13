@@ -32,6 +32,10 @@ function hashString(str) {
 }
 
 export function getGroupColor(group) {
+  if (!group) {
+    // Default color for ungrouped items
+    return "#9E9E9E"; // Neutral gray
+  }
   const h = hashString(group);
   return COLOR_PALETTE[h % COLOR_PALETTE.length];
 }
