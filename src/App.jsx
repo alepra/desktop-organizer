@@ -39,9 +39,11 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [hoveredGroup, setHoveredGroup] = useState(null);
   const [dragStart, setDragStart] = useState({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null });
+  const [undoStack, setUndoStack] = useState([]); // Stack of undo actions: [{ itemPath, fromGroup, toGroup }, ...]
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 });
   const containerRef = useRef(null);
   const centersDuringDragRef = useRef(null); // Store centers during drag to prevent recalculation
+  const initialItemGroupsRef = useRef(null); // Store initial itemGroups state when Review Mode first enters
 
   // Track viewport size for layout calculations
   useEffect(() => {
@@ -98,6 +100,8 @@ export default function App() {
     setDraggedPositions({}); // Reset dragged positions on new scan
     setItemGroups({}); // Reset item group assignments
     setReviewMode(false); // Reset review mode
+    initialItemGroupsRef.current = null; // Clear initial state reference on new scan
+    setUndoStack([]); // Clear undo stack on new scan
     setMode("scatter");
 
     setTimeout(() => setMode("migrate"), 700);
@@ -213,6 +217,19 @@ export default function App() {
     const wasDroppedIntoGroup = hoveredGroup && hoveredGroup !== dragStart.originalGroup;
     const wasDroppedFreeFloating = !hoveredGroup;
     
+    // Track the move for undo functionality (only if actually moved)
+    if (wasDroppedIntoGroup || wasDroppedFreeFloating) {
+      // Capture the move information for undo and push onto stack
+      const fromGroup = dragStart.originalGroup;
+      const toGroup = wasDroppedIntoGroup ? hoveredGroup : null;
+      
+      setUndoStack(prev => [...prev, {
+        itemPath: dragStart.filePath,
+        fromGroup: fromGroup,
+        toGroup: toGroup
+      }]);
+    }
+    
     // If dropped on a different group, reassign the item
     if (wasDroppedIntoGroup) {
       // Update item's assigned group - this triggers groups recalculation
@@ -261,6 +278,69 @@ export default function App() {
     setHoveredGroup(null);
     setDragStart({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null });
   }
+
+  // Reset to initial auto-grouped state
+  function resetToInitialState() {
+    if (initialItemGroupsRef.current !== null) {
+      // Restore itemGroups to initial state
+      setItemGroups({ ...initialItemGroupsRef.current });
+      // Clear all dragged positions to restore visual state
+      setDraggedPositions({});
+      // Clear any drag state
+      setIsDragging(false);
+      setHoveredGroup(null);
+      setDragStart({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null });
+      // Clear undo stack on reset
+      setUndoStack([]);
+    }
+  }
+
+  // Undo last move from stack
+  function undoLastMove() {
+    if (undoStack.length === 0) return;
+    
+    // Pop the most recent action from the stack
+    const stack = [...undoStack];
+    const lastMove = stack.pop();
+    
+    if (!lastMove) return;
+    
+    const { itemPath, fromGroup } = lastMove;
+    
+    // Restore item to its previous group
+    setItemGroups(prev => {
+      const next = { ...prev };
+      if (fromGroup === null) {
+        // Was explicitly ungrouped, restore that state
+        next[itemPath] = null;
+      } else {
+        // Was in a specific group, restore it
+        // If it was in its original group, we set it to that group name
+        // The groups useMemo will handle it correctly and restore empty clusters
+        next[itemPath] = fromGroup;
+      }
+      return next;
+    });
+    
+    // Clear dragged position to allow proper grid layout
+    setDraggedPositions(prev => {
+      const next = { ...prev };
+      delete next[itemPath];
+      return next;
+    });
+    
+    // Update undo stack to remove the action we just undid
+    setUndoStack(stack);
+  }
+
+  // Capture initial itemGroups state when Review Mode is first entered
+  useEffect(() => {
+    if (reviewMode && initialItemGroupsRef.current === null) {
+      // Capture the initial state (empty object means all items in original groups)
+      // This happens only once when Review Mode is first activated after auto-grouping
+      initialItemGroupsRef.current = { ...itemGroups };
+    }
+  }, [reviewMode]); // Only depend on reviewMode, not itemGroups, to capture once
 
   const originalGroups = useMemo(() => groupFiles(files), [files]);
   
@@ -437,7 +517,59 @@ export default function App() {
 
   return (
     <div style={{ padding: 20, fontFamily: "sans-serif" }}>
-      <button onClick={scanDesktop}>Scan Desktop</button>
+      <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
+        <button onClick={scanDesktop}>Scan Desktop</button>
+        {reviewMode && (
+          <>
+            <button
+              onClick={undoLastMove}
+              disabled={undoStack.length === 0}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: undoStack.length > 0 ? "#17a2b8" : "#cccccc",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: undoStack.length > 0 ? "pointer" : "not-allowed",
+                fontSize: "13px",
+                fontWeight: "500",
+                transition: "background-color 0.2s ease",
+                opacity: undoStack.length > 0 ? 1 : 0.6
+              }}
+              onMouseEnter={(e) => {
+                if (undoStack.length > 0) {
+                  e.currentTarget.style.backgroundColor = "#138496";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (undoStack.length > 0) {
+                  e.currentTarget.style.backgroundColor = "#17a2b8";
+                }
+              }}
+            >
+              Undo{undoStack.length > 0 ? ` (${undoStack.length})` : ''}
+            </button>
+            <button
+              onClick={resetToInitialState}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "#6c757d",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+                fontSize: "13px",
+                fontWeight: "500",
+                transition: "background-color 0.2s ease"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#5a6268"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#6c757d"}
+            >
+              Reset to Auto-Grouped State
+            </button>
+          </>
+        )}
+      </div>
 
       <div
         ref={containerRef}
