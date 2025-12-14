@@ -1,6 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { groupFiles } from "./logic/groupFiles";
 import { getGroupColor } from "./logic/colors";
+import { generateExecutionPlan, normalizeExecutionPlan } from "./logic/executionPlan";
+import { executePlan } from "./logic/executor";
 import "./FadeItem.css";
 
 function FadeItem({ children, style, group, delay, onMouseDown, reviewMode }) {
@@ -38,12 +40,18 @@ export default function App() {
   const [itemGroups, setItemGroups] = useState({}); // Track which group each item belongs to
   const [isDragging, setIsDragging] = useState(false);
   const [hoveredGroup, setHoveredGroup] = useState(null);
-  const [dragStart, setDragStart] = useState({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null });
+  const [dragStart, setDragStart] = useState({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null, initialMouseX: 0, initialMouseY: 0, initialElementX: 0, initialElementY: 0, hasDragged: false });
   const [undoStack, setUndoStack] = useState([]); // Stack of undo actions: [{ itemPath, fromGroup, toGroup }, ...]
+  const [isRestoring, setIsRestoring] = useState(false); // Track if restore is in progress (for button disable)
+  
+  // Drag threshold in pixels - must move this far before drag starts
+  const DRAG_THRESHOLD = 5;
   const [viewportSize, setViewportSize] = useState({ width: 1200, height: 800 });
   const containerRef = useRef(null);
   const centersDuringDragRef = useRef(null); // Store centers during drag to prevent recalculation
   const initialItemGroupsRef = useRef(null); // Store initial itemGroups state when Review Mode first enters
+  const hasExecutedRef = useRef(false); // Track if execution has occurred
+  const isRestoringRef = useRef(false); // Guard: prevent multiple simultaneous restore calls
 
   // Track viewport size for layout calculations
   useEffect(() => {
@@ -84,8 +92,13 @@ export default function App() {
     };
   }, [isDragging]);
 
-  async function scanDesktop() {
+  async function scanDesktop(isPostExecutionRefresh = false) {
+    console.log("Scan Desktop button clicked - calling scan-desktop IPC");
     const result = await window.electron.invoke("scan-desktop");
+    
+    // Log scan completion with item count
+    console.log(`Desktop scan completed: ${result.length} items scanned`);
+    
     setFiles(result);
 
     const scatter = {};
@@ -102,6 +115,13 @@ export default function App() {
     setReviewMode(false); // Reset review mode
     initialItemGroupsRef.current = null; // Clear initial state reference on new scan
     setUndoStack([]); // Clear undo stack on new scan
+    
+    // If this is a post-execution refresh, keep hasExecutedRef true to prevent re-execution
+    // Otherwise, reset it for a fresh scan
+    if (!isPostExecutionRefresh) {
+      hasExecutedRef.current = false; // Reset execution tracking on new scan
+    }
+    
     setMode("scatter");
 
     setTimeout(() => setMode("migrate"), 700);
@@ -117,42 +137,92 @@ export default function App() {
     // Don't exit review mode when dragging starts
     
     e.preventDefault();
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
     
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    // Capture mouse position in viewport coordinates
+    const mouseX = e.clientX;
+    const mouseY = e.clientY;
+    
+    // Capture element's bounding box in viewport coordinates
+    const elementRect = e.currentTarget.getBoundingClientRect();
+    
+    // Compute offset from mouse to element's top-left corner (viewport coordinates)
+    const offsetX = mouseX - elementRect.left;
+    const offsetY = mouseY - elementRect.top;
     
     // Store current centers before starting drag to prevent recalculation
     centersDuringDragRef.current = { ...groupCenters };
     
+    // Initialize drag state but don't start visual dragging until threshold is exceeded
     setIsDragging(true);
     setDragStart({
       filePath,
-      offsetX: reviewMode ? 0 : mouseX - currentX, // In Review Mode, use absolute positioning
-      offsetY: reviewMode ? 0 : mouseY - currentY,
-      originalGroup: currentGroup
+      offsetX: offsetX,
+      offsetY: offsetY,
+      originalGroup: currentGroup,
+      initialMouseX: mouseX,
+      initialMouseY: mouseY,
+      initialElementX: elementRect.left,
+      initialElementY: elementRect.top,
+      hasDragged: false
     });
+    
+    // Don't set initial dragged position yet - wait for threshold
   }
 
   function handleMouseMove(e) {
     if (!isDragging || !dragStart.filePath || !containerRef.current) return;
     
-    const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    // Capture mouse position in viewport coordinates
+    const mouseX = e.clientX;
+    const mouseY = e.clientY;
     
-    // Update dragged position
+    // Calculate distance from initial mouse position
+    const deltaX = mouseX - dragStart.initialMouseX;
+    const deltaY = mouseY - dragStart.initialMouseY;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    
+    // Only start visual dragging if mouse moved beyond threshold
+    if (!dragStart.hasDragged && distance < DRAG_THRESHOLD) {
+      // Not yet dragged - don't update position or check hover
+      return;
+    }
+    
+    // Mark that actual dragging has occurred
+    if (!dragStart.hasDragged) {
+      setDragStart(prev => ({
+        ...prev,
+        hasDragged: true
+      }));
+      
+      // Set initial dragged position from stored element position
+      setDraggedPositions(prev => ({
+        ...prev,
+        [dragStart.filePath]: {
+          x: dragStart.initialElementX,
+          y: dragStart.initialElementY
+        }
+      }));
+    }
+    
+    // Position element so it stays under the cursor (viewport coordinates for position: fixed)
+    const elementLeft = mouseX - dragStart.offsetX;
+    const elementTop = mouseY - dragStart.offsetY;
+    
+    // Update dragged position using viewport coordinates
     setDraggedPositions(prev => ({
       ...prev,
       [dragStart.filePath]: {
-        x: reviewMode ? mouseX : mouseX - dragStart.offsetX,
-        y: reviewMode ? mouseY : mouseY - dragStart.offsetY
+        x: elementLeft,
+        y: elementTop
       }
     }));
     
     // Check which group (if any) the mouse is hovering over
-    const hovered = findGroupAtPosition(mouseX, mouseY);
+    // Convert to container-relative coordinates for hover detection
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const containerX = mouseX - containerRect.left;
+    const containerY = mouseY - containerRect.top;
+    const hovered = findGroupAtPosition(containerX, containerY);
     setHoveredGroup(hovered);
   }
   
@@ -214,6 +284,21 @@ export default function App() {
       return;
     }
     
+    // If drag distance was less than threshold, treat as click - do nothing
+    if (!dragStart.hasDragged) {
+      // Cancel drag - no move occurred
+      setIsDragging(false);
+      setHoveredGroup(null);
+      setDraggedPositions(prev => {
+        const next = { ...prev };
+        delete next[dragStart.filePath];
+        return next;
+      });
+      setDragStart({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null, initialMouseX: 0, initialMouseY: 0, initialElementX: 0, initialElementY: 0, hasDragged: false });
+      return;
+    }
+    
+    // Only process drop if actual dragging occurred
     const wasDroppedIntoGroup = hoveredGroup && hoveredGroup !== dragStart.originalGroup;
     const wasDroppedFreeFloating = !hoveredGroup;
     
@@ -276,22 +361,82 @@ export default function App() {
     // The groupCenters useMemo will recalculate once isDragging becomes false
     setIsDragging(false);
     setHoveredGroup(null);
-    setDragStart({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null });
+    setDragStart({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null, initialMouseX: 0, initialMouseY: 0, hasDragged: false });
   }
 
-  // Reset to initial auto-grouped state
-  function resetToInitialState() {
+  // Reset to initial auto-grouped state (UI only, no filesystem changes)
+  function resetToAutoGroupedState() {
+    // Restore itemGroups to initial auto-grouped state
+    // Empty object {} means all items are in their original groups
     if (initialItemGroupsRef.current !== null) {
-      // Restore itemGroups to initial state
       setItemGroups({ ...initialItemGroupsRef.current });
-      // Clear all dragged positions to restore visual state
-      setDraggedPositions({});
-      // Clear any drag state
-      setIsDragging(false);
-      setHoveredGroup(null);
-      setDragStart({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null });
-      // Clear undo stack on reset
-      setUndoStack([]);
+    } else {
+      // If snapshot doesn't exist yet, use empty object (default auto-grouped state)
+      setItemGroups({});
+    }
+    
+    // Clear all dragged positions to restore visual state
+    setDraggedPositions({});
+    
+    // Clear any drag state
+    setIsDragging(false);
+    setHoveredGroup(null);
+    setDragStart({ filePath: null, offsetX: 0, offsetY: 0, originalGroup: null });
+    
+    // Clear undo stack on reset
+    setUndoStack([]);
+  }
+
+  // Restore Desktop - explicitly user-triggered, one-shot per click
+  // Executes immediately: restore → scan → update UI
+  // No file watchers or delayed execution - all operations complete synchronously
+  async function restoreDesktop() {
+    // Guard: If restore is already running, ignore additional calls
+    if (isRestoringRef.current || isRestoring) {
+      console.log("Restore already in progress, ignoring duplicate call");
+      return;
+    }
+    
+    // Set guards to prevent concurrent calls
+    isRestoringRef.current = true;
+    setIsRestoring(true);
+    
+    try {
+      console.log("=".repeat(60));
+      console.log("RESTORE DESKTOP - User triggered");
+      console.log("=".repeat(60));
+      
+      // Restore real desktop from baseline snapshot
+      // Uses ONLY .desktop_organizer_baseline.json
+      // All file moves execute synchronously - function returns only after all moves complete
+      const result = await window.desktopApi.restoreDesktop();
+      
+      // Restore has completed - all files have been physically moved
+      // Now trigger immediate scan to refresh UI with new filesystem state
+      console.log("=".repeat(60));
+      if (result && result.ok === true) {
+        console.log(`Desktop restore completed successfully: ${result.restoredCount} items restored`);
+      } else {
+        console.error("Desktop restore failed:", result?.error || "Unknown error");
+      }
+      console.log("=".repeat(60));
+      
+      // Force immediate desktop scan to refresh UI
+      // This scan will pick up the restored filesystem state immediately
+      // No file watchers needed - scan happens immediately after restore completes
+      console.log("Refreshing UI from restored desktop...");
+      await scanDesktop(true); // Pass true to indicate post-restore refresh
+      
+      console.log("Restore and UI refresh completed");
+    } catch (error) {
+      console.error("Restore error:", error);
+      // On error, still refresh UI to show current state
+      console.log("Refreshing UI after restore error...");
+      await scanDesktop(true);
+    } finally {
+      // Always clear guards when restore completes (success or failure)
+      isRestoringRef.current = false;
+      setIsRestoring(false);
     }
   }
 
@@ -380,6 +525,142 @@ export default function App() {
       .flatMap(([group, items]) => items)
       .filter(file => itemGroups[file.path] === null);
   }, [originalGroups, itemGroups]);
+  
+  // Get ALL items that are not in any group (including those skipped by groupFiles)
+  // This ensures ALL scanned items are rendered, regardless of grouping logic
+  const trulyUngroupedItems = useMemo(() => {
+    // Get all file paths that are in groups
+    const groupedPaths = new Set(
+      Object.values(originalGroups).flatMap(items => items.map(f => f.path))
+    );
+    
+    // Return all files from scan that are:
+    // 1. Not in any group (not in groupedPaths), OR
+    // 2. Explicitly set to null in itemGroups
+    return files.filter(file => {
+      const isInGroup = groupedPaths.has(file.path);
+      const isExplicitlyUngrouped = itemGroups[file.path] === null;
+      return !isInGroup || isExplicitlyUngrouped;
+    });
+  }, [files, originalGroups, itemGroups]);
+
+  // Organize Desktop - generates and executes execution plan
+  // This function is called explicitly when user clicks "Organize" button
+  // It does NOT run automatically on scan
+  // 🚨 UI SAFETY: Errors in plan generation must NOT clear UI state
+  async function organizeDesktop() {
+    if (files.length === 0 || Object.keys(originalGroups).length === 0) {
+      console.log("Cannot organize: no files or groups available");
+      return;
+    }
+    
+    // Prevent re-execution if we're refreshing UI after execution
+    if (hasExecutedRef.current) {
+      console.log("Execution already in progress or completed - skipping");
+      return;
+    }
+    
+    // Derive desktop path from first file's absolute path
+    // Extract directory by finding last path separator (handles both \ and /)
+    const firstFilePath = files[0].path;
+    const lastBackslash = firstFilePath.lastIndexOf('\\');
+    const lastSlash = firstFilePath.lastIndexOf('/');
+    const lastSeparator = Math.max(lastBackslash, lastSlash);
+    const desktopPath = lastSeparator >= 0 ? firstFilePath.substring(0, lastSeparator) : firstFilePath;
+    
+    // 🚨 UI SAFETY: Wrap plan generation in try-catch to prevent errors from clearing UI state
+    let rawPlan;
+    let normalizedPlan;
+    
+    try {
+      // Use originalGroups (from auto-grouping) for execution plan, NOT groups (which includes UI drag changes)
+      rawPlan = generateExecutionPlan(originalGroups, desktopPath, files);
+      normalizedPlan = normalizeExecutionPlan(rawPlan, originalGroups, files);
+    } catch (error) {
+      // Plan generation failed - log error and exit cleanly WITHOUT mutating UI state
+      console.error("=".repeat(60));
+      console.error("EXECUTION PLAN GENERATION FAILED");
+      console.error("Error:", error.message);
+      console.error("=".repeat(60));
+      console.error("UI state preserved - no changes made to desktop items, halos, or colors");
+      // Exit cleanly - do NOT call scanDesktop, do NOT clear UI state, do NOT reset anything
+      return;
+    }
+    
+    console.log('Raw Execution Plan:', JSON.stringify(rawPlan, null, 2));
+    console.log('Normalized Execution Plan:', JSON.stringify(normalizedPlan, null, 2));
+    
+    // VALIDATION: Filter out no-op moves (sourcePath === destinationPath)
+    // Normalize paths for comparison (case-insensitive, handle path separators)
+    const normalizePath = (p) => p.replace(/\\/g, '/').toLowerCase();
+    const realMoves = normalizedPlan.filesToMove.filter(move => {
+      const source = normalizePath(move.sourcePath);
+      const dest = normalizePath(move.destinationPath);
+      return source !== dest;
+    });
+    
+    // Check if there are any real operations to perform
+    const hasRealMoves = realMoves.length > 0;
+    const hasFoldersToCreate = normalizedPlan.foldersToCreate.length > 0;
+    const hasRealOperations = hasRealMoves || hasFoldersToCreate;
+    
+    // If ALL files are filtered out (no real moves) and no folders to create, abort execution
+    if (!hasRealOperations) {
+      console.log("=".repeat(60));
+      console.log("NO-OP EXECUTION: all destinations equal sources");
+      console.log(`  Filtered out ${normalizedPlan.filesToMove.length} no-op moves`);
+      console.log(`  Folders to create: ${normalizedPlan.foldersToCreate.length}`);
+      console.log("  Execution aborted - desktop will not change");
+      console.log("  Baseline will NOT be overwritten");
+      console.log("=".repeat(60));
+      
+      // Mark execution as occurred to prevent re-execution, but don't actually execute
+      hasExecutedRef.current = true;
+      
+      // Don't call executor or save baseline for no-op execution
+      // Trigger scan to refresh UI (but mark as post-execution to prevent re-execution)
+      scanDesktop(true);
+      return;
+    }
+    
+    // Create filtered plan with only real moves
+    const filteredPlan = {
+      foldersToCreate: normalizedPlan.foldersToCreate,
+      filesToMove: realMoves
+    };
+    
+    if (realMoves.length < normalizedPlan.filesToMove.length) {
+      console.log(`Filtered out ${normalizedPlan.filesToMove.length - realMoves.length} no-op moves (sourcePath === destinationPath)`);
+      console.log(`Proceeding with ${realMoves.length} real moves`);
+    }
+    
+    // Execute plan immediately after it's finalized
+    console.log("EXECUTION STARTED");
+    
+    // Mark execution as occurred immediately to track state
+    hasExecutedRef.current = true;
+    
+    // Call executor with filtered plan and handle completion
+    // Skip baseline snapshot on re-execution (after first execution)
+    const skipBaseline = false; // Always take baseline on first execution
+    executePlan(filteredPlan, skipBaseline).then((result) => {
+      if (result.success) {
+        console.log("EXECUTION COMPLETED SUCCESSFULLY - Refreshing UI from desktop scan");
+        // After successful execution, trigger fresh desktop scan to refresh UI
+        // This will rebuild UI state from actual desktop contents post-execution
+        // Pass true to indicate this is a post-execution refresh (prevents re-execution)
+        scanDesktop(true);
+      } else {
+        console.log("EXECUTION COMPLETED WITH ERRORS - UI state unchanged");
+        // On error, don't refresh - keep current UI state
+        hasExecutedRef.current = false; // Allow retry on error
+      }
+    }).catch((error) => {
+      console.error("EXECUTION FAILED:", error);
+      // On failure, don't refresh - keep current UI state
+      hasExecutedRef.current = false; // Allow retry on failure
+    });
+  }
 
   const groupCenters = useMemo(() => {
     // During drag, return stored centers to prevent layout recalculation
@@ -518,7 +799,35 @@ export default function App() {
   return (
     <div style={{ padding: 20, fontFamily: "sans-serif" }}>
       <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
-        <button onClick={scanDesktop}>Scan Desktop</button>
+        <button onClick={() => scanDesktop()}>Scan Desktop</button>
+        <button
+          onClick={organizeDesktop}
+          disabled={files.length === 0 || Object.keys(originalGroups).length === 0 || hasExecutedRef.current}
+          style={{
+            padding: "8px 16px",
+            backgroundColor: (files.length === 0 || Object.keys(originalGroups).length === 0 || hasExecutedRef.current) ? "#cccccc" : "#28a745",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: (files.length === 0 || Object.keys(originalGroups).length === 0 || hasExecutedRef.current) ? "not-allowed" : "pointer",
+            fontSize: "13px",
+            fontWeight: "500",
+            transition: "background-color 0.2s ease",
+            opacity: (files.length === 0 || Object.keys(originalGroups).length === 0 || hasExecutedRef.current) ? 0.6 : 1
+          }}
+          onMouseEnter={(e) => {
+            if (!(files.length === 0 || Object.keys(originalGroups).length === 0 || hasExecutedRef.current)) {
+              e.currentTarget.style.backgroundColor = "#218838";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!(files.length === 0 || Object.keys(originalGroups).length === 0 || hasExecutedRef.current)) {
+              e.currentTarget.style.backgroundColor = "#28a745";
+            }
+          }}
+        >
+          Organize
+        </button>
         {reviewMode && (
           <>
             <button
@@ -550,7 +859,7 @@ export default function App() {
               Undo{undoStack.length > 0 ? ` (${undoStack.length})` : ''}
             </button>
             <button
-              onClick={resetToInitialState}
+              onClick={resetToAutoGroupedState}
               style={{
                 padding: "8px 16px",
                 backgroundColor: "#6c757d",
@@ -566,6 +875,34 @@ export default function App() {
               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#6c757d"}
             >
               Reset to Auto-Grouped State
+            </button>
+            <button
+              onClick={restoreDesktop}
+              disabled={isRestoring}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: isRestoring ? "#cccccc" : "#dc3545",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: isRestoring ? "not-allowed" : "pointer",
+                fontSize: "13px",
+                fontWeight: "500",
+                transition: "background-color 0.2s ease",
+                opacity: isRestoring ? 0.6 : 1
+              }}
+              onMouseEnter={(e) => {
+                if (!isRestoring) {
+                  e.currentTarget.style.backgroundColor = "#c82333";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isRestoring) {
+                  e.currentTarget.style.backgroundColor = "#dc3545";
+                }
+              }}
+            >
+              {isRestoring ? "Restoring..." : "Restore Desktop"}
             </button>
           </>
         )}
@@ -686,8 +1023,16 @@ export default function App() {
                           reviewMode={reviewMode}
                           style={{
                             display: "block",
-                            position: draggedPos ? "absolute" : "relative",
-                            transform: draggedPos ? `translate(${draggedPos.x}px, ${draggedPos.y}px)` : "none",
+                            position: isCurrentlyDragging ? "fixed" : (draggedPos ? "absolute" : "relative"),
+                            ...(isCurrentlyDragging && draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined ? {
+                              left: `${draggedPos.x}px`,
+                              top: `${draggedPos.y}px`,
+                              transform: "none"
+                            } : draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined ? {
+                              transform: `translate(${draggedPos.x}px, ${draggedPos.y}px)`
+                            } : {
+                              transform: "none"
+                            }),
                             padding: "8px 16px",
                             margin: "2px 0",
                             backgroundColor: isCurrentlyDragging ? "#f0f0f0" : "transparent",
@@ -698,7 +1043,7 @@ export default function App() {
                             color: "#495057",
                             border: "none",
                             borderRadius: "0",
-                            transition: "background-color 0.15s ease"
+                            transition: isCurrentlyDragging ? "none" : "background-color 0.15s ease"
                           }}
                           onMouseEnter={(e) => {
                             if (!isCurrentlyDragging && mode === "organize") {
@@ -731,7 +1076,7 @@ export default function App() {
             })}
             
             {/* Ungrouped items card */}
-            {ungroupedItems.length > 0 && (
+            {trulyUngroupedItems.length > 0 && (
               <div
                 style={{
                   display: "flex",
@@ -789,11 +1134,11 @@ export default function App() {
                       zIndex: 1
                     }}
                   >
-                    {ungroupedItems.length} {ungroupedItems.length === 1 ? 'item' : 'items'}
+                    {trulyUngroupedItems.length} {trulyUngroupedItems.length === 1 ? 'item' : 'items'}
                   </div>
                 </div>
                 <div style={{ padding: "8px 0", flex: 1 }}>
-                  {ungroupedItems.map((f) => {
+                  {trulyUngroupedItems.map((f) => {
                     const draggedPos = draggedPositions[f.path];
                     const isCurrentlyDragging = isDragging && dragStart.filePath === f.path;
                     
@@ -805,8 +1150,16 @@ export default function App() {
                         reviewMode={reviewMode}
                         style={{
                           display: "block",
-                          position: draggedPos ? "absolute" : "relative",
-                          transform: draggedPos ? `translate(${draggedPos.x}px, ${draggedPos.y}px)` : "none",
+                          position: isCurrentlyDragging ? "fixed" : (draggedPos ? "absolute" : "relative"),
+                          ...(isCurrentlyDragging && draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined ? {
+                            left: `${draggedPos.x}px`,
+                            top: `${draggedPos.y}px`,
+                            transform: "none"
+                          } : draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined ? {
+                            transform: `translate(${draggedPos.x}px, ${draggedPos.y}px)`
+                          } : {
+                            transform: "none"
+                          }),
                           padding: "8px 16px",
                           margin: "2px 0",
                           backgroundColor: isCurrentlyDragging ? "#f0f0f0" : "transparent",
@@ -817,7 +1170,7 @@ export default function App() {
                           color: "#495057",
                           border: "none",
                           borderRadius: "0",
-                          transition: "background-color 0.15s ease"
+                          transition: isCurrentlyDragging ? "none" : "background-color 0.15s ease"
                         }}
                         onMouseEnter={(e) => {
                           if (!isCurrentlyDragging && mode === "organize") {
@@ -880,9 +1233,20 @@ export default function App() {
             })}
             
             {/* Render ungrouped items separately */}
-            {ungroupedItems.map((f) => {
+            {trulyUngroupedItems.map((f) => {
+              const base = positions[f.path] || { x: 0, y: 0 };
               const draggedPos = draggedPositions[f.path];
-              if (!draggedPos) return null;
+              const isCurrentlyDragging = isDragging && dragStart.filePath === f.path;
+              
+              let x, y;
+              if (draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined) {
+                x = draggedPos.x;
+                y = draggedPos.y;
+              } else {
+                // Use scatter position from scan
+                x = base.x;
+                y = base.y;
+              }
               
               return (
                 <FadeItem
@@ -891,13 +1255,19 @@ export default function App() {
                   delay={0}
                   reviewMode={reviewMode}
                   style={{
-                    position: "absolute",
-                    transform: `translate(${draggedPos.x}px, ${draggedPos.y}px)`,
-                    transition: "transform 0.9s ease",
+                    position: isCurrentlyDragging ? "fixed" : "absolute",
+                    ...(isCurrentlyDragging && draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined ? {
+                      left: `${draggedPos.x}px`,
+                      top: `${draggedPos.y}px`,
+                      transform: "none"
+                    } : {
+                      transform: `translate(${x}px, ${y}px)`
+                    }),
+                    transition: isCurrentlyDragging ? "none" : "transform 0.9s ease",
                     cursor: mode === "organize" ? "grab" : "default",
                     userSelect: "none"
                   }}
-                  onMouseDown={(e) => handleMouseDown(e, f.path, draggedPos.x, draggedPos.y, null)}
+                  onMouseDown={(e) => handleMouseDown(e, f.path, x, y, null)}
                 >
                   {f.name}
                 </FadeItem>
@@ -951,7 +1321,7 @@ export default function App() {
                 }
                 
                 let x, y;
-                if (draggedPos) {
+                if (draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined) {
                   x = draggedPos.x;
                   y = draggedPos.y;
                 } else if (mode === "organize") {
@@ -974,8 +1344,14 @@ export default function App() {
                     delay={idx * 40}
                     reviewMode={reviewMode}
                     style={{
-                      position: "absolute",
-                      transform: `translate(${x}px, ${y}px)`,
+                      position: isCurrentlyDragging ? "fixed" : "absolute",
+                      ...(isCurrentlyDragging && draggedPos && draggedPos.x !== undefined && draggedPos.y !== undefined ? {
+                        left: `${draggedPos.x}px`,
+                        top: `${draggedPos.y}px`,
+                        transform: "none"
+                      } : {
+                        transform: `translate(${x}px, ${y}px)`
+                      }),
                       transition: isCurrentlyDragging ? "none" : "transform 0.9s ease",
                       cursor: isCurrentlyDragging ? "grabbing" : (mode === "organize" ? "grab" : "default"),
                       zIndex: isCurrentlyDragging ? 1000 : "auto",
