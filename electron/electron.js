@@ -321,6 +321,12 @@ ipcMain.handle("restore-desktop", async () => {
 // IPC handlers MUST be registered (after exports to avoid circular dependency)
 require("./ipcHandlers");
 
+// Import overlay window functions for cleanup on app close
+const { destroyOverlayWindow } = require("./overlayWindow");
+
+// Import overlay window for visual testing
+const { createOverlayWindow } = require("./overlayWindow");
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -341,8 +347,17 @@ function createWindow() {
   win.on("ready-to-show", () => win.show());
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
+  // Clean up overlay window before quitting
+  destroyOverlayWindow();
   if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => {
+  // Ensure overlay is destroyed on quit
+  destroyOverlayWindow();
 });

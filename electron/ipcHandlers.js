@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { execSync } = require("child_process");
+const { createOverlayWindow } = require("./overlayWindow");
 
 /**
  * Protected organizer metadata paths
@@ -111,6 +112,9 @@ ipcMain.handle("scan-desktop", async () => {
     // X MUST equal (files + folders) per diagnostic guarantee
     console.log(`Desktop scan completed: ${items.length} items scanned (protected items excluded)`);
     console.log(`  Canonical Desktop Path: ${canonicalDesktopPath}`);
+    
+    // Show overlay window after successful scan (testing mode only)
+    createOverlayWindow();
     
     return items;
   } catch (error) {
@@ -261,6 +265,17 @@ function notifyWindowsExplorerRefresh() {
 ipcMain.handle("refresh-desktop-explorer", async () => {
   try {
     notifyWindowsExplorerRefresh();
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler to hide overlay window (testing mode)
+ipcMain.handle("hide-overlay", async () => {
+  try {
+    const { hideOverlayWindow } = require("./overlayWindow");
+    hideOverlayWindow();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
