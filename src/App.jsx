@@ -800,6 +800,13 @@ export default function App() {
     <div style={{ padding: 20, fontFamily: "sans-serif" }}>
       <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
         <button onClick={() => scanDesktop()}>Scan Desktop</button>
+        <button onClick={async () => {
+          const icons = await window.electron.invoke("get-desktop-icon-positions");
+          console.log("Native icons:", icons.length);
+          if (icons.length > 0) {
+            console.log("First 3 entries:", icons.slice(0, 3));
+          }
+        }}>Get Icon Positions</button>
         <button
           onClick={organizeDesktop}
           disabled={files.length === 0 || Object.keys(originalGroups).length === 0 || hasExecutedRef.current}
