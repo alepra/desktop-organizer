@@ -154,6 +154,11 @@ function createOverlayWindow() {
             const listViewDPI = 120;
             const scaleFactor = listViewDPI / 96;
 
+            // Micro-alignment offset: Uniform offset to center halos precisely on icon visual centers
+            // Derived from Windows icon cell geometry (ListView cell padding + icon visual center alignment)
+            const HALO_OFFSET_X = +18;  // Horizontal offset in CSS pixels (down-right offset)
+            const HALO_OFFSET_Y = +22;  // Vertical offset in CSS pixels (down-right offset)
+
             // Coordinate-space diagnostic logs
             const screenX = window.screenX;
             const screenY = window.screenY;
@@ -199,11 +204,15 @@ function createOverlayWindow() {
               const cssX = icon.x / scaleFactor;
               const cssY = icon.y / scaleFactor;
 
+              // Micro-alignment: Apply uniform offset to center halos on icon visual centers
+              const alignedX = cssX + HALO_OFFSET_X;
+              const alignedY = cssY + HALO_OFFSET_Y;
+
               // Convert CSS pixel coordinates to overlay-local coordinates
-              // screenX = cssX - virtualBounds.left
-              // screenY = cssY - virtualBounds.top
-              const screenX = cssX - overlayBounds.x;
-              const screenY = cssY - overlayBounds.y;
+              // screenX = alignedX - virtualBounds.left
+              // screenY = alignedY - virtualBounds.top
+              const screenX = alignedX - overlayBounds.x;
+              const screenY = alignedY - overlayBounds.y;
 
               // Circle with diameter 120px, radius 60px
               const RADIUS = 60;
