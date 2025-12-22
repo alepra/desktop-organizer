@@ -1,0 +1,18 @@
+/* Global baseline */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: sans-serif;
+}
+
+/* Animation classes */
+.fade-item {
+  opacity: 0;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  transform: translateY(6px);
+}
+
+.fade-item.visible {
+  opacity: 1;
+  transform: translateY(0);
+}

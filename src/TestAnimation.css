@@ -1,0 +1,11 @@
+.test-box {
+  width: 50px;
+  height: 50px;
+  background: red;
+  animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+  from { transform: scale(1); }
+  to   { transform: scale(1.4); }
+}

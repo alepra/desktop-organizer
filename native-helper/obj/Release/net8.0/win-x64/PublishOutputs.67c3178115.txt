@@ -1,0 +1,2 @@
+C:\desktop-organizer-RECOVERED\desktop-organizer-main\native-helper\bin\Release\net8.0\win-x64\publish\IconPositionHelper.pdb
+C:\desktop-organizer-RECOVERED\desktop-organizer-main\native-helper\bin\Release\net8.0\win-x64\publish\IconPositionHelper.exe

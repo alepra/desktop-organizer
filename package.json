@@ -1,0 +1,32 @@
+{
+  "name": "desktop-organizer",
+  "version": "0.1.0",
+  "main": "electron/electron.js",
+  "private": true,
+  "scripts": {
+    "kill-port": "kill-port 53001",
+    "dev": "vite --config vite.config.mjs --port 53001 --strictPort",
+    "electron": "wait-on http://localhost:53001 && electron . --no-sandbox",
+    "start": "npm run kill-port && concurrently \"npm run dev\" \"npm run electron\"",
+    "build": "vite build",
+    "build-electron": "electron-builder",
+    "rebuild-native": "electron-rebuild -f -w native-helper",
+    "build-helper": "cd native-helper && dotnet build -c Release && powershell -Command \"if (Test-Path bin\\Release\\net8.0\\win-x64\\IconPositionHelper.dll) { Copy-Item bin\\Release\\net8.0\\win-x64\\IconPositionHelper.dll bin\\Release\\net8.0\\IconPositionHelper.dll -Force }\"",
+    "publish-helper": "cd native-helper && dotnet publish -c Release -r win-x64",
+    "start:clean": "npm run kill-port && npm run build-helper && concurrently \"npm run dev\" \"npm run electron\""
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.2",
+    "concurrently": "^8.2.2",
+    "electron": "^33.0.2",
+    "electron-builder": "^24.13.3",
+    "electron-rebuild": "^3.2.9",
+    "kill-port": "^2.0.1",
+    "vite": "^5.4.0",
+    "wait-on": "^7.2.0"
+  },
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  }
+}
