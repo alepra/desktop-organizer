@@ -8,7 +8,7 @@ import "./FadeItem.css";
 function FadeItem({ children, style, group, delay, onMouseDown, reviewMode }) {
   const color = getGroupColor(group);
   // Remove halos entirely in Review Mode
-  const haloThickness = reviewMode ? 0 : 6;
+  const haloThickness = reviewMode ? 0 : 8;
 
   return (
     <div

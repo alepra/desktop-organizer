@@ -318,6 +318,9 @@ ipcMain.handle("restore-desktop", async () => {
   return await restoreDesktopFromBaseline(desktopPath);
 });
 
+// Disable GPU acceleration globally to prevent GPU overlay conflicts
+app.disableHardwareAcceleration();
+
 // IPC handlers MUST be registered (after exports to avoid circular dependency)
 require("./ipcHandlers");
 

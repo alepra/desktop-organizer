@@ -5,14 +5,7 @@ const os = require("os");
 const { execSync, execFile } = require("child_process");
 const { updateOverlayHalos } = require("./overlayWindow");
 
-// Load native addon for desktop icon positions
-let desktopIconsAddon = null;
-try {
-  desktopIconsAddon = require(path.join(__dirname, "..", "native-helper", "build", "Release", "desktop_icons.node"));
-} catch (error) {
-  console.error("[NATIVE] Failed to load desktop_icons native addon:", error.message);
-  console.error("[NATIVE] Make sure to run: npm run rebuild-native");
-}
+// Native C++ addon disabled — project uses IconPositionHelper.exe only
 
 /**
  * Protected organizer metadata paths

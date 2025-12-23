@@ -19,13 +19,13 @@
 /* Continuous halo pulse */
 @keyframes pulseHalo {
   0% {
-    box-shadow: 0 0 0 6px var(--halo-color);
+    box-shadow: 0 0 0 8px var(--halo-color);
   }
   50% {
-    box-shadow: 0 0 0 10px var(--halo-color);
+    box-shadow: 0 0 0 12px var(--halo-color);
   }
   100% {
-    box-shadow: 0 0 0 6px var(--halo-color);
+    box-shadow: 0 0 0 8px var(--halo-color);
   }
 }
 

@@ -60,6 +60,7 @@ function createOverlayWindow() {
     resizable: false,
     movable: false,
     focusable: false,
+    fullscreenable: false,
     show: false,
     // Do NOT rely on fullscreen for positioning – we explicitly set x/y/width/height
     alwaysOnTop: true,
@@ -71,6 +72,9 @@ function createOverlayWindow() {
       nodeIntegration: true
     }
   });
+
+  // Force overlay priority with screen-saver level
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
 
   // Click-through - overlay must not interfere with desktop interaction
   overlayWindow.setIgnoreMouseEvents(true);
